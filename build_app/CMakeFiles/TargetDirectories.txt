@@ -1,3 +1,0 @@
-/home/roman/drive/build_app/CMakeFiles/test.dir
-/home/roman/drive/build_app/CMakeFiles/edit_cache.dir
-/home/roman/drive/build_app/CMakeFiles/rebuild_cache.dir
