@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/roman/drive/build_app/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

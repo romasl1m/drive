@@ -1,0 +1,5 @@
+build/
+td/
+# tdlib/
+tdlib/*.sqlite
+tdlib/*.binlog
