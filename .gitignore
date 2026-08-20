@@ -2,5 +2,6 @@ build/
 build_app/
 td/
 tdlib/
+backup.db
 # tdlib/*.sqlite
 # tdlib/*.binlog
