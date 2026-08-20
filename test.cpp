@@ -3,6 +3,8 @@
 #include <cstdlib>
 #include <memory>
 #include <vector>
+#include <filesystem>
+#include <sqlite3.h>
 #include <td/telegram/Client.h>
 #include <td/telegram/td_api.h>
 #include <td/telegram/td_api.hpp>
@@ -15,9 +17,17 @@ class TelegramAuth {
         client_id_ = client_manager_->create_client_id();
         std::cout << "[INFO] Inicjalizacja klienta TDLib (ID: " << client_id_ << ")..." << std::endl;
 
+        init_database();
+
         auto get_version = td::td_api::make_object<td::td_api::getOption>();
         get_version->name_ = "version";
         client_manager_->send(client_id_, 0, std::move(get_version));
+    }
+
+    ~TelegramAuth() {
+        if (db_) {
+            sqlite3_close(db_);
+        }
     }
 
     void run() {
@@ -37,6 +47,12 @@ class TelegramAuth {
     bool is_authorized_ = false;
     bool is_running_ = true;
     std::int64_t created_chat_id_ = 0;
+    std::int64_t user_id_ = 0;
+
+    sqlite3 *db_ = nullptr;
+
+    std::vector<std::int64_t> search_chat_ids_;
+    std::size_t search_index_ = 0;
 
     struct FileInfo {
         std::int64_t message_id;
@@ -45,6 +61,71 @@ class TelegramAuth {
         std::int64_t file_size;
     };
     std::vector<FileInfo> found_files_;
+
+    bool is_downloading_ = false;
+    std::int32_t downloading_file_id_ = 0;
+    std::string download_dir_ = "/home/roman/Downloads/drive";
+
+    void move_to_downloads(const std::string &src_path) {
+        namespace fs = std::filesystem;
+        fs::create_directories(download_dir_);
+        fs::path src(src_path);
+        fs::path dst = fs::path(download_dir_) / src.filename();
+        std::error_code ec;
+        fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
+        if (ec) {
+            std::cerr << "[BŁĄD] Nie można skopiować pliku do " << dst << ": " << ec.message() << std::endl;
+        } else {
+            std::cout << "[INFO] Plik zapisany do: " << dst.string() << std::endl;
+        }
+    }
+
+    void init_database() {
+        int rc = sqlite3_open("backup.db", &db_);
+        if (rc != SQLITE_OK) {
+            std::cerr << "[BŁĄD] Nie można otworzyć bazy danych: " << sqlite3_errmsg(db_) << std::endl;
+            exit(1);
+        }
+
+        const char *sql = "CREATE TABLE IF NOT EXISTS channels ("
+                          "user_id INTEGER PRIMARY KEY, "
+                          "chat_id INTEGER NOT NULL);";
+        char *err_msg = nullptr;
+        rc = sqlite3_exec(db_, sql, nullptr, nullptr, &err_msg);
+        if (rc != SQLITE_OK) {
+            std::cerr << "[BŁĄD] Nie można utworzyć tabeli: " << err_msg << std::endl;
+            sqlite3_free(err_msg);
+            exit(1);
+        }
+    }
+
+    std::int64_t db_get_channel(std::int64_t user_id) {
+        sqlite3_stmt *stmt;
+        const char *sql = "SELECT chat_id FROM channels WHERE user_id = ?;";
+        if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+            return 0;
+        }
+        sqlite3_bind_int64(stmt, 1, user_id);
+        std::int64_t result = 0;
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            result = sqlite3_column_int64(stmt, 0);
+        }
+        sqlite3_finalize(stmt);
+        return result;
+    }
+
+    void db_save_channel(std::int64_t user_id, std::int64_t chat_id) {
+        sqlite3_stmt *stmt;
+        const char *sql = "INSERT OR REPLACE INTO channels (user_id, chat_id) VALUES (?, ?);";
+        if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+            std::cerr << "[BŁĄD] Nie można zapisać kanału: " << sqlite3_errmsg(db_) << std::endl;
+            return;
+        }
+        sqlite3_bind_int64(stmt, 1, user_id);
+        sqlite3_bind_int64(stmt, 2, chat_id);
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    }
 
     void process_response(std::int64_t request_id, td::td_api::object_ptr<td::td_api::Object> object) {
         if (not object) {
@@ -56,11 +137,43 @@ class TelegramAuth {
         if (id == td::td_api::updateAuthorizationState::ID) {
             auto auth_state = td::move_tl_object_as<td::td_api::updateAuthorizationState>(object);
             handle_auth_state(std::move(auth_state->authorization_state_));
+        } else if (id == td::td_api::user::ID) {
+            if (request_id == 12) {
+                auto user = td::move_tl_object_as<td::td_api::user>(object);
+                user_id_ = user->id_;
+                std::cout << "[INFO] Zalogowano jako user ID: " << user_id_ << std::endl;
+                resolve_backup_channel();
+            }
+        } else if (id == td::td_api::chats::ID) {
+            if (request_id == 10) {
+                auto chats = td::move_tl_object_as<td::td_api::chats>(object);
+                search_chat_ids_ = std::move(chats->chat_ids_);
+                search_index_ = 0;
+                check_next_candidate();
+            }
         } else if (id == td::td_api::chat::ID) {
             auto chat = td::move_tl_object_as<td::td_api::chat>(object);
 
-            if (request_id == 4) {
+            if (request_id == 13) {
                 created_chat_id_ = chat->id_;
+                std::cout << "\n[Sukces] Kanał backup załadowany z bazy! ID: " << created_chat_id_ << std::endl;
+                show_menu();
+            } else if (request_id == 11) {
+                if (chat->title_ == "backup" && chat->type_->get_id() == td::td_api::chatTypeSupergroup::ID) {
+                    auto *sg = static_cast<td::td_api::chatTypeSupergroup *>(chat->type_.get());
+                    if (sg->is_channel_) {
+                        created_chat_id_ = chat->id_;
+                        db_save_channel(user_id_, created_chat_id_);
+                        std::cout << "\n[Sukces] Znaleziono istniejący kanał backup! ID: " << created_chat_id_ << std::endl;
+                        show_menu();
+                        return;
+                    }
+                }
+                search_index_++;
+                check_next_candidate();
+            } else if (request_id == 4) {
+                created_chat_id_ = chat->id_;
+                db_save_channel(user_id_, created_chat_id_);
                 std::cout << "\n[Sukces] Kanał został utworzony! ID: " << created_chat_id_ << std::endl;
                 send_first_message(created_chat_id_, "Kanał backup zainicjalizowany.");
             }
@@ -91,16 +204,50 @@ class TelegramAuth {
             }
         } else if (id == td::td_api::updateFile::ID) {
             auto update = td::move_tl_object_as<td::td_api::updateFile>(object);
-            if (update->file_ && update->file_->local_ && update->file_->local_->is_downloading_completed_) {
-                std::cout << "[Sukces] Pobrano plik: " << update->file_->local_->path_ << std::endl;
-                show_menu();
+            if (update->file_) {
+                std::cout << "[DEBUG] updateFile: file_id=" << update->file_->id_
+                          << ", size=" << update->file_->size_ << std::endl;
+                if (update->file_->local_) {
+                    std::cout << "[DEBUG]   local: downloaded_size=" << update->file_->local_->downloaded_size_
+                              << ", is_downloading_active=" << update->file_->local_->is_downloading_active_
+                              << ", is_downloading_completed=" << update->file_->local_->is_downloading_completed_
+                              << ", path=" << update->file_->local_->path_ << std::endl;
+                }
+
+                if (is_downloading_ && update->file_->id_ == downloading_file_id_) {
+                    if (update->file_->local_ && update->file_->local_->is_downloading_completed_) {
+                        std::cout << "[Sukces] Pobrano plik: " << update->file_->local_->path_ << std::endl;
+                        move_to_downloads(update->file_->local_->path_);
+                        is_downloading_ = false;
+                        downloading_file_id_ = 0;
+                        show_menu();
+                    } else if (update->file_->local_ && update->file_->local_->is_downloading_active_) {
+                        std::int64_t downloaded = update->file_->local_->downloaded_size_;
+                        std::int64_t total = update->file_->size_;
+                        if (total > 0) {
+                            int percent = static_cast<int>(100 * downloaded / total);
+                            std::cout << "[Postęp] " << downloaded << " / " << total
+                                      << " bajtów (" << percent << "%)" << std::endl;
+                        } else {
+                            std::cout << "[Postęp] " << downloaded << " bajtów pobrano" << std::endl;
+                        }
+                    }
+                }
             }
         } else if (id == td::td_api::error::ID) {
             auto error = td::move_tl_object_as<td::td_api::error>(object);
             std::cerr << "\n[BŁĄD TELEGRAMA] Request ID: " << request_id
                       << " | Kod: " << error->code_
                       << " | Wiadomość: " << error->message_ << std::endl;
-            if (is_authorized_ && created_chat_id_ != 0) {
+            if (request_id == 9) {
+                std::cerr << "[DEBUG] Błąd pobierania pliku! file_id=" << downloading_file_id_ << std::endl;
+                is_downloading_ = false;
+                downloading_file_id_ = 0;
+            }
+            if (request_id == 13) {
+                std::cout << "[INFO] Kanał z bazy nie istnieje. Szukanie..." << std::endl;
+                search_backup_channel();
+            } else if (is_authorized_ && created_chat_id_ != 0) {
                 show_menu();
             } else {
                 is_running_ = false;
@@ -167,8 +314,9 @@ class TelegramAuth {
         case td::td_api::authorizationStateReady::ID: {
             if (not is_authorized_) {
                 is_authorized_ = true;
-                std::cout << "\n[STAN] Zalogowano pomyślnie! Tworzenie kanału..." << std::endl;
-                create_private_channel();
+                std::cout << "\n[STAN] Zalogowano pomyślnie!" << std::endl;
+                auto request = td::td_api::make_object<td::td_api::getMe>();
+                client_manager_->send(client_id_, 12, std::move(request));
             }
             break;
         }
@@ -180,6 +328,19 @@ class TelegramAuth {
         default:
             std::cout << "[STAN] Inny stan autoryzacji ID: " << state->get_id() << std::endl;
             break;
+        }
+    }
+
+    void resolve_backup_channel() {
+        std::int64_t stored_id = db_get_channel(user_id_);
+        if (stored_id != 0) {
+            std::cout << "[INFO] Znaleziono kanał w bazie (ID: " << stored_id << "). Weryfikacja..." << std::endl;
+            auto request = td::td_api::make_object<td::td_api::getChat>();
+            request->chat_id_ = stored_id;
+            client_manager_->send(client_id_, 13, std::move(request));
+        } else {
+            std::cout << "[INFO] Brak kanału w bazie. Szukanie na serwerze..." << std::endl;
+            search_backup_channel();
         }
     }
 
@@ -223,6 +384,24 @@ class TelegramAuth {
             std::cout << "[BŁĄD] Nieprawidłowa opcja." << std::endl;
             show_menu();
         }
+    }
+
+    void search_backup_channel() {
+        auto request = td::td_api::make_object<td::td_api::searchChatsOnServer>();
+        request->query_ = "backup";
+        request->limit_ = 20;
+        client_manager_->send(client_id_, 10, std::move(request));
+    }
+
+    void check_next_candidate() {
+        if (search_index_ >= search_chat_ids_.size()) {
+            std::cout << "[INFO] Nie znaleziono kanału backup. Tworzenie nowego..." << std::endl;
+            create_private_channel();
+            return;
+        }
+        auto request = td::td_api::make_object<td::td_api::getChat>();
+        request->chat_id_ = search_chat_ids_[search_index_];
+        client_manager_->send(client_id_, 11, std::move(request));
     }
 
     void create_private_channel() {
@@ -287,6 +466,9 @@ class TelegramAuth {
         auto messages = td::move_tl_object_as<td::td_api::messages>(object);
         found_files_.clear();
 
+        std::cout << "[DEBUG] handle_chat_history: total_count=" << messages->total_count_
+                  << ", messages.size()=" << messages->messages_.size() << std::endl;
+
         std::cout << "\n===== PLIKI NA KANALE =====" << std::endl;
         int index = 0;
 
@@ -306,6 +488,9 @@ class TelegramAuth {
                     info.file_name = doc_msg->document_->file_name_;
                     info.file_size = doc_msg->document_->document_->size_;
                     found_files_.push_back(info);
+                    std::cout << "[DEBUG] Dokument: file_id=" << info.file_id
+                              << ", msg_id=" << info.message_id
+                              << ", remote_id=" << doc_msg->document_->document_->remote_->id_ << std::endl;
 
                     std::cout << "  " << index << ". " << info.file_name
                               << " (" << info.file_size << " bajtów)" << std::endl;
@@ -355,19 +540,51 @@ class TelegramAuth {
         request->priority_ = 32;
         request->offset_ = 0;
         request->limit_ = 0;
-        request->synchronous_ = true;
+        request->synchronous_ = false;
 
+        is_downloading_ = true;
+        downloading_file_id_ = file_id;
+
+        std::cout << "[DEBUG] downloadFile: file_id=" << file_id
+                  << ", priority=32, synchronous=false" << std::endl;
         std::cout << "[INFO] Pobieranie pliku (ID: " << file_id << ")..." << std::endl;
         client_manager_->send(client_id_, 9, std::move(request));
     }
 
     void handle_file_downloaded(td::td_api::object_ptr<td::td_api::file> file) {
-        if (file->local_ && file->local_->is_downloading_completed_) {
-            std::cout << "[Sukces] Plik pobrany do: " << file->local_->path_ << std::endl;
+        std::cout << "[DEBUG] handle_file_downloaded: file_id=" << file->id_
+                  << ", size=" << file->size_
+                  << ", expected_size=" << file->expected_size_ << std::endl;
+
+        if (file->local_) {
+            std::cout << "[DEBUG]   local: path=" << file->local_->path_
+                      << ", is_downloading_active=" << file->local_->is_downloading_active_
+                      << ", is_downloading_completed=" << file->local_->is_downloading_completed_
+                      << ", downloaded_prefix_size=" << file->local_->downloaded_prefix_size_
+                      << ", downloaded_size=" << file->local_->downloaded_size_ << std::endl;
         } else {
-            std::cout << "[INFO] Pobieranie w toku... oczekiwanie na updateFile." << std::endl;
+            std::cout << "[DEBUG]   local: nullptr!" << std::endl;
         }
-        show_menu();
+
+        if (file->remote_) {
+            std::cout << "[DEBUG]   remote: id=" << file->remote_->id_
+                      << ", is_uploading_completed=" << file->remote_->is_uploading_completed_ << std::endl;
+        }
+
+        if (file->local_ && file->local_->is_downloading_completed_) {
+            std::cout << "[Sukces] Plik pobrany z TDLib: " << file->local_->path_ << std::endl;
+            move_to_downloads(file->local_->path_);
+            is_downloading_ = false;
+            downloading_file_id_ = 0;
+            show_menu();
+        } else if (file->local_ && file->local_->is_downloading_active_) {
+            std::cout << "[DEBUG] Pobieranie aktywne, czekam na updateFile..." << std::endl;
+        } else {
+            std::cout << "[BŁĄD] Pobieranie nie rozpoczęte! Sprawdź file_id i stan pliku." << std::endl;
+            is_downloading_ = false;
+            downloading_file_id_ = 0;
+            show_menu();
+        }
     }
 };
 
