@@ -2,6 +2,11 @@ build/
 build_app/
 td/
 tdlib/
-backup.db
-# tdlib/*.sqlite
-# tdlib/*.binlog
+
+*.db
+*.sqlite
+*.binlog
+
+.cache/
+.claude/
+CMakeUserPresets.json
