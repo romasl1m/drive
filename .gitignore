@@ -1,12 +1,27 @@
+# Build
 build/
 build_app/
+*.deb
+
+# TDLib source and runtime
 td/
 tdlib/
 
+# Databases and sessions
 *.db
 *.sqlite
 *.binlog
 
+# IDE / tooling
 .cache/
 .claude/
 CMakeUserPresets.json
+compile_commands.json
+
+# Qt generated
+moc_*.cpp
+ui_*.h
+qrc_*.cpp
+
+# Credentials / user data (never commit)
+*.env

@@ -1,0 +1,3 @@
+#!/bin/bash
+set -e
+# Nothing to stop — the app runs in the user session, not as a system service.

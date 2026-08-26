@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Drive
+Comment=Private backup to Telegram
+Exec=drive --background
+Icon=drive
+Terminal=false
+Type=Application
+X-GNOME-Autostart-enabled=true
+Hidden=false

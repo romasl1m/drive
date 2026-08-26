@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Drive
+Comment=Private backup to Telegram
+Exec=drive
+Icon=drive
+Terminal=false
+Type=Application
+Categories=Utility;Archiving;Network;
+Keywords=backup;telegram;sync;cloud;
+StartupNotify=true

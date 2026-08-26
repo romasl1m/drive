@@ -1,56 +1,55 @@
-# Vault
+# Drive
 
-Private unlimited file backup powered by Telegram. Files in watched folders are synced automatically to your own Telegram channel — no third-party servers, no subscriptions, no size limits.
+Private unlimited backup to Telegram.
 
-## Features
+Drive automatically backs up your selected folders to a private Telegram channel. It runs in the background, syncs file changes instantly, and lets you restore them at any time.
 
-- Automatic sync via inotify — changes are detected and uploaded instantly
-- Restore any file or folder from the web UI
-- QR code or phone number authentication
-- SQLite-backed file index for fast lookups
-- Lightweight single-binary with embedded web interface
-
-## Dependencies
-
-- [TDLib](https://github.com/tdlib/td) (Telegram Database Library)
-- [Crow](https://github.com/CrowCpp/Crow) (HTTP framework)
-- SQLite3
-- CMake 3.10+
-- C++17 compiler
-
-## Build
+## Install from .deb
 
 ```bash
-# Clone and build TDLib first (see TDLib docs)
-# Then:
+sudo apt install ./drive_1.0.0_amd64.deb
+```
+
+Then search "Drive" in your application menu and launch it.
+
+## Build from source
+
+### Dependencies
+
+```bash
+sudo apt install build-essential cmake qtbase5-dev libqt5svg5-dev libsqlite3-dev libssl-dev zlib1g-dev
+```
+
+TDLib must be built separately (included in `build/` after initial setup):
+
+```bash
+cd td && mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release
+make -j$(nproc)
+cd ../..
+```
+
+### Compile
+
+```bash
 mkdir build_app && cd build_app
-cmake ..
-make
+cmake .. -DCMAKE_PREFIX_PATH=../build
+make -j$(nproc)
 ```
 
-## Setup
-
-Set your Telegram API credentials before running:
+### Package
 
 ```bash
-export API_ID=your_api_id
-export API_HASH=your_api_hash
+./build-deb.sh 1.0.0
 ```
-
-Get these from https://my.telegram.org
-
-## Run
-
-```bash
-./build_app/drive
-```
-
-Open http://localhost:8080 in your browser.
 
 ## How it works
 
-1. Authenticate with your Telegram account
-2. Vault creates (or finds) a private channel called "backup"
-3. Add folders to watch — files are uploaded as documents to the channel
-4. Changes and new files are detected via inotify and synced automatically
-5. Restore files through the web interface at any time
+1. Launch Drive from your application menu
+2. Connect your Telegram account (phone number or QR code)
+3. Select folders to back up
+4. Drive monitors them and uploads changes automatically
+5. Close the window — backup continues in the background via the tray icon
+6. Reopen anytime to see status or restore files
+
+All data is stored in `~/.local/share/drive/`. No system-level configuration needed.
