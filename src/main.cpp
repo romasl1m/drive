@@ -42,14 +42,13 @@ int main(int argc, char *argv[]) {
     fs::create_directories(drive::data_dir());
     fs::create_directories(drive::config_dir());
 
-    // Start backup engine on background thread
+    // Create engine but don't start yet
     drive::BackupEngine engine;
-    std::thread engine_thread([&engine]() { engine.run(); });
 
     // Create main window
     drive::MainWindow window(&engine);
 
-    // Wire callbacks from engine thread to Qt main thread
+    // Wire callbacks BEFORE starting engine thread to avoid race
     engine.set_auth_callback([&window](drive::BackupEngine::AuthState state) {
         QMetaObject::invokeMethod(&window, [&window, state]() {
             window.onAuthStateChanged(state);
@@ -58,8 +57,7 @@ int main(int argc, char *argv[]) {
 
     engine.set_error_callback([&window](const std::string &msg) {
         QMetaObject::invokeMethod(&window, [&window, msg]() {
-            (void)window;
-            (void)msg;
+            window.onAuthError(msg);
         }, Qt::QueuedConnection);
     });
 
@@ -68,6 +66,9 @@ int main(int argc, char *argv[]) {
             window.onProgressUpdate();
         }, Qt::QueuedConnection);
     });
+
+    // Now start engine thread
+    std::thread engine_thread([&engine]() { engine.run(); });
 
     // Handle second-instance showing window
     QObject::connect(&server, &QLocalServer::newConnection, [&window, &server]() {

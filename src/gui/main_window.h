@@ -25,6 +25,7 @@ public:
     explicit MainWindow(BackupEngine *engine, QWidget *parent = nullptr);
 
     void onAuthStateChanged(BackupEngine::AuthState state);
+    void onAuthError(const std::string &msg);
     void onProgressUpdate();
 
 protected:
@@ -34,6 +35,7 @@ private slots:
     void refreshUI();
     void addFolder();
     void removeSelectedFolder();
+    void restoreFolders();
     void trayActivated(QSystemTrayIcon::ActivationReason reason);
 
 private:
@@ -60,6 +62,7 @@ private:
     QListWidget *folder_list_;
     QTreeWidget *file_tree_;
     QPushButton *remove_btn_;
+    QPushButton *restore_btn_;
 
     // Tray
     QSystemTrayIcon *tray_icon_;

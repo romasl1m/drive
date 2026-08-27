@@ -10,6 +10,10 @@
 #include <QGroupBox>
 #include <QSplitter>
 #include <QFrame>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QCheckBox>
+#include <QScrollArea>
 
 namespace drive {
 
@@ -153,6 +157,11 @@ void MainWindow::setupDashboard() {
     remove_btn_->setEnabled(false);
     connect(remove_btn_, &QPushButton::clicked, this, &MainWindow::removeSelectedFolder);
     folder_btns->addWidget(remove_btn_);
+
+    restore_btn_ = new QPushButton("Restore...");
+    restore_btn_->setStyleSheet("QPushButton { color: #2563eb; background: transparent; border: 1px solid #bfdbfe; } QPushButton:hover { background: #eff6ff; }");
+    connect(restore_btn_, &QPushButton::clicked, this, &MainWindow::restoreFolders);
+    folder_btns->addWidget(restore_btn_);
     fl->addLayout(folder_btns);
 
     connect(folder_list_, &QListWidget::currentRowChanged, this, [this](int row) {
@@ -212,7 +221,8 @@ void MainWindow::trayActivated(QSystemTrayIcon::ActivationReason reason) {
 void MainWindow::onAuthStateChanged(BackupEngine::AuthState state) {
     switch (state) {
     case BackupEngine::AuthState::WAIT_PHONE:
-        auth_widget_->showPhoneInput();
+        // TDLib is ready for auth — show welcome screen so user can pick method
+        stack_->setCurrentWidget(auth_widget_);
         break;
     case BackupEngine::AuthState::WAIT_CODE:
         auth_widget_->showCodeInput();
@@ -229,6 +239,10 @@ void MainWindow::onAuthStateChanged(BackupEngine::AuthState state) {
     default:
         break;
     }
+}
+
+void MainWindow::onAuthError(const std::string &msg) {
+    auth_widget_->showError(msg);
 }
 
 void MainWindow::onProgressUpdate() {
@@ -288,6 +302,75 @@ void MainWindow::removeSelectedFolder() {
     if (!item) return;
     engine_->remove_watched_folder(item->text().toStdString());
     refreshUI();
+}
+
+void MainWindow::restoreFolders() {
+    auto folders = engine_->get_watched_folders();
+    if (folders.empty()) {
+        QMessageBox::information(this, "Restore", "No backed up folders to restore.");
+        return;
+    }
+
+    QDialog dialog(this);
+    dialog.setWindowTitle("Restore Folders");
+    dialog.setMinimumWidth(400);
+    auto *layout = new QVBoxLayout(&dialog);
+
+    auto *label = new QLabel("Select folders to restore:");
+    label->setStyleSheet("font-weight: 600; font-size: 13px;");
+    layout->addWidget(label);
+
+    std::vector<QCheckBox*> checkboxes;
+    for (auto &f : folders) {
+        auto *cb = new QCheckBox(QString::fromStdString(f));
+        cb->setChecked(true);
+        layout->addWidget(cb);
+        checkboxes.push_back(cb);
+    }
+
+    layout->addSpacing(12);
+    auto *dest_label = new QLabel("Restore to:");
+    dest_label->setStyleSheet("font-size: 12px; color: #6b7280;");
+    layout->addWidget(dest_label);
+
+    auto *dest_layout = new QHBoxLayout;
+    auto *dest_edit = new QLabel(QDir::homePath() + "/Drive-Restore");
+    dest_edit->setStyleSheet("font-size: 13px; padding: 6px 10px; background: white; border: 1px solid #e5e7eb; border-radius: 6px;");
+    dest_layout->addWidget(dest_edit, 1);
+
+    auto *browse_btn = new QPushButton("Browse...");
+    browse_btn->setStyleSheet("QPushButton { background: #f3f4f6; border: 1px solid #e5e7eb; } QPushButton:hover { background: #e5e7eb; }");
+    connect(browse_btn, &QPushButton::clicked, &dialog, [&]() {
+        QString dir = QFileDialog::getExistingDirectory(&dialog, "Choose restore destination",
+            dest_edit->text(), QFileDialog::ShowDirsOnly);
+        if (!dir.isEmpty()) dest_edit->setText(dir);
+    });
+    dest_layout->addWidget(browse_btn);
+    layout->addLayout(dest_layout);
+
+    layout->addSpacing(12);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    buttons->button(QDialogButtonBox::Ok)->setText("Restore");
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+
+    if (dialog.exec() != QDialog::Accepted) return;
+
+    QString dest = dest_edit->text();
+    if (dest.isEmpty()) return;
+
+    int total = 0;
+    for (size_t i = 0; i < checkboxes.size(); i++) {
+        if (!checkboxes[i]->isChecked()) continue;
+        std::string folder = folders[i];
+        std::string folder_name = QString::fromStdString(folder).split('/').last().toStdString();
+        std::string target = dest.toStdString() + "/" + folder_name;
+        total += engine_->restore_folder(folder, target);
+    }
+
+    QMessageBox::information(this, "Restore Complete",
+        QString("Restored %1 file(s) to:\n%2").arg(total).arg(dest));
 }
 
 void MainWindow::updateStats() {

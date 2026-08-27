@@ -53,6 +53,10 @@ private:
     QWidget *qr_page_;
     QLabel *qr_image_;
     QTimer *qr_timer_;
+
+    // Status
+    QLabel *status_label_;
+    QString last_qr_link_;
 };
 
 } // namespace drive

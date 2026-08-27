@@ -9,9 +9,10 @@ SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "Building Drive ${VERSION} .deb package..."
 
-# Build the binary
+# Build the binary (clean build to ensure all changes are picked up)
 echo "  Compiling..."
 BUILD_DIR="${SRC_DIR}/build_app"
+rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
 cmake "${SRC_DIR}" \
@@ -59,7 +60,7 @@ Section: utils
 Priority: optional
 Architecture: ${ARCH}
 Installed-Size: ${INSTALLED_SIZE}
-Depends: libsqlite3-0, libssl3, zlib1g, libqt5widgets5, libqt5network5, libqt5svg5
+Depends: libsqlite3-0, libssl3, zlib1g, libqt5widgets5, libqt5network5, libqt5svg5, libqrencode4
 Maintainer: romasl1m
 Description: Private unlimited backup to Telegram
  Drive automatically backs up your selected folders to a private

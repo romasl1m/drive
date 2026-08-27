@@ -8,8 +8,8 @@ namespace drive {
 
 // Telegram application credentials (registered at https://my.telegram.org)
 // These belong to the Drive application, not individual users.
-constexpr int APP_API_ID = 25898048;
-constexpr const char *APP_API_HASH = "a98e456ec1e9a02bb1e9b2b4c3fa12c0";
+constexpr int APP_API_ID = 23815619;
+constexpr const char *APP_API_HASH = "f2895bc3380cbb20af7a139914df259d";
 
 constexpr const char *APP_NAME = "Drive";
 constexpr const char *APP_VERSION = "1.0.0";

@@ -12,6 +12,31 @@ sudo apt install ./drive_1.0.0_amd64.deb
 
 Then search "Drive" in your application menu and launch it.
 
+## Update / Reinstall
+
+To update to a new version, just install the new .deb over the existing one:
+
+```bash
+sudo apt install ./drive_<new_version>_amd64.deb
+```
+
+Or if building from source:
+
+```bash
+git pull
+./build-deb.sh 1.1.0
+sudo apt install ./drive_1.1.0_amd64.deb
+```
+
+To fully remove and reinstall:
+
+```bash
+sudo apt remove drive
+sudo apt install ./drive_1.0.0_amd64.deb
+```
+
+Your backup data in `~/.local/share/drive/` is preserved across reinstalls.
+
 ## Build from source
 
 ### Dependencies
@@ -51,5 +76,16 @@ make -j$(nproc)
 4. Drive monitors them and uploads changes automatically
 5. Close the window — backup continues in the background via the tray icon
 6. Reopen anytime to see status or restore files
+
+## Restoring files
+
+1. Open Drive and click **Restore...** in the Watched Folders section
+2. Select which folders to restore (all are checked by default)
+3. Choose a destination directory (defaults to `~/Drive-Restore`)
+4. Click **Restore** — files are downloaded from Telegram and placed in the destination
+
+Files that still exist locally are copied directly. Files only available in Telegram are downloaded first.
+
+## Data
 
 All data is stored in `~/.local/share/drive/`. No system-level configuration needed.

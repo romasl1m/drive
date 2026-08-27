@@ -28,10 +28,13 @@ add_executable(drive ${SOURCES} ${HEADERS})
 
 target_include_directories(drive PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
+find_library(QRENCODE_LIB qrencode REQUIRED)
+
 target_link_libraries(drive PRIVATE
     Td::TdStatic
     SQLite::SQLite3
     Threads::Threads
     Qt5::Widgets
     Qt5::Network
+    ${QRENCODE_LIB}
 )
